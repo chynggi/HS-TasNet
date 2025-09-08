@@ -83,7 +83,7 @@ def calculate_sdr(
     assert target.shape == pred.shape
     target_energy = torch.mean(target ** 2, dim = -1)
     distortion_energy = F.mse_loss(pred, target, reduction = 'none').mean(dim = -1)
-    return 10 * torch.log10(target_energy / distortion_energy.clamp(min = eps))
+    return 10 * torch.log10(target_energy.clamp(min = eps) / distortion_energy.clamp(min = eps))
 
 # dataset collation
 
