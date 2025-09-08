@@ -10,6 +10,7 @@ import musdb
 
 import torch
 from torch import cat, stack, tensor, from_numpy
+import torch.nn.functional as F
 from torch.nn import Module
 from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
@@ -26,11 +27,9 @@ from hs_tasnet.hs_tasnet import HSTasNet
 
 from ema_pytorch import EMA
 
-from einops import rearrange, reduce
+from einops import rearrange, repeat, reduce
 
 from musdb import DB as MusDB
-
-from fast_bss_eval import bss_eval_sources
 
 # constants
 
@@ -43,6 +42,9 @@ def exists(v):
 
 def divisible_by(num, den):
     return (num % den) == 0
+
+def join(arr, delimiter = ' '):
+    return delimiter.join(arr)
 
 def satisfy_prob(prob):
     return random() < prob
@@ -70,6 +72,18 @@ def not_improved_last_n_steps(losses, steps):
     last_n_losses = losses[-(steps + 1):]
 
     return (last_n_losses[1:] > last_n_losses[:-1]).all().item()
+
+# sdr
+
+def calculate_sdr(
+    target: Tensor,
+    pred: Tensor,
+    eps = 1e-8
+):
+    assert target.shape == pred.shape
+    target_energy = torch.mean(target ** 2, dim = -1)
+    distortion_energy = F.mse_loss(pred, target, reduction = 'none').mean(dim = -1)
+    return 10 * torch.log10(target_energy / distortion_energy.clamp(min = eps))
 
 # dataset collation
 
@@ -395,7 +409,7 @@ class Trainer(Module):
         ema_kwargs: dict = dict(),
         checkpoint_every = 1,
         checkpoint_folder = './checkpoints',
-        eval_sdr = False,
+        eval_sdr = True,
         eval_results_folder = './eval-results',
         decay_lr_factor = 0.5,
         decay_lr_if_not_improved_steps = 3,    # decay learning rate if validation loss does not improve for this amount of epochs
@@ -762,13 +776,21 @@ class Trainer(Module):
                         eval_len = pred_targets.shape[-1] # may have been auto curtailed
                         eval_targets = eval_targets[..., :eval_len]
 
-                        # handle stereo
+                        # fold channels into batch
 
                         eval_targets_for_sdr, pred_targets_for_sdr = tuple(rearrange(t, 'b t ... n -> (b ...) t n') for t in (eval_targets, pred_targets))
 
-                        for eval_target_for_sdr, pred_target_for_sdr in zip(eval_targets_for_sdr, pred_targets_for_sdr):
-                            sdr, *_ = bss_eval_sources(eval_target_for_sdr, pred_target_for_sdr)
-                            eval_sdr.append(sdr)
+                        # use simplest sdr (not si)
+
+                        sdrs = calculate_sdr(eval_targets_for_sdr, pred_targets_for_sdr)
+
+                        sdrs = reduce(sdrs, 'b t -> t', 'mean')
+
+                        sdrs_string = join([f'{sdr.item():.3f}' for sdr in sdrs])
+
+                        self.print(f'[{epoch}] avg sdr per source: {sdrs_string}')
+
+                        eval_sdr.append(sdrs.mean())
 
                 avg_eval_loss = stack(eval_losses).mean()
                 avg_eval_loss = acc.gather_for_metrics(avg_eval_loss).mean()

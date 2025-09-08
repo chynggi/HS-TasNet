@@ -91,7 +91,7 @@ def decorate_print_latency(log_prefix = None):
             out = fn(*args, **kwargs)
             elapsed_ms = current_time_ms() - start_time
 
-            latency_msg = f'{int(elapsed_ms):.2f} ms'
+            latency_msg = f'{elapsed_ms:.2f} ms'
 
             if exists(log_prefix):
                 latency_msg = f'{log_prefix} {latency_msg}'
@@ -852,7 +852,7 @@ class HSTasNet(Module):
             if not return_targets_with_loss:
                 return recon_loss
 
-            return recon_loss, targets
+            return recon_loss, recon_audio
 
         # outputs
 
