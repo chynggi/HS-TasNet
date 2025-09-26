@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from torch.fft import irfft
 from torch import nn, compiler, Tensor, tensor, is_tensor, cat, stft, hann_window, view_as_complex, view_as_real
 from torch.nn import LSTM, GRU, ConvTranspose1d, Module, ModuleList
+from safetensors.torch import load_file
 
 from numpy import ndarray
 
@@ -451,9 +452,21 @@ class HSTasNet(Module):
         path = Path(path)
         assert path.exists()
 
-        pkg = torch.load(str(path), map_location = 'cpu')
+        if path.suffix == '.safetensors':
+            # safetensors 파일 로드 로직 추가
+            state_dict = load_file(str(path), device='cpu')
+            self.load_state_dict(state_dict, strict=strict)
+        else:
+            # 기존 pickle 파일 로드 로직
+            pkg = torch.load(str(path), map_location = 'cpu')
+            
+            # Trainer를 통해 저장된 체크포인트인지 확인
+            if 'model' in pkg:
+                state_dict = pkg['model']
+            else:
+                state_dict = pkg # 모델 state_dict만 저장된 경우
 
-        self.load_state_dict(pkg['model'], strict = strict)
+            self.load_state_dict(state_dict, strict = strict)
 
     @classmethod
     def init_and_load_from(cls, path, strict = True):
